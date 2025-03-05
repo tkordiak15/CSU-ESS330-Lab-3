@@ -1,9 +1,8 @@
 ---
-title: "lab-03: Covid-19"
+title: "lab-03"
 subtitle: ESS330 
 author: 
   - name: Tayler Kordiak
-    email: taylerkordiak@colostate.edu
 format: html
 ---
 
