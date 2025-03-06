@@ -1,0 +1,296 @@
+---
+title: "lab-03: Covid-19"
+subtitle: ESS330 
+author: 
+  - name: Tayler Kordiak
+    email: taylerkordiak@colostate.edu
+format: html
+---
+
+```{r}
+library(flextable)
+library(zoo)
+library(tidyverse)
+library(dplyr)
+library(visdat)
+library(ggplot2)
+```
+#Question 1
+#Easy access to historical data is important because being self informed lets us shape the way we want to live, and believe in the things that we want to believen in on our own accord. Espcially public health when talking about COCID-19. Being able to access new cases in the area I'm living could prevent me and my household from getting sick. When this data becomes inaccessable, I find that it is against our own right to know information that could affect me dispropotionatly, or harm me in any way. Preventing access to information about resource management or climate trends is unwarrented and stops me from fight against or with issues that I want to support. 
+
+#Question 2.1
+```{r}
+url = 'https://raw.githubusercontent.com/nytimes/covid-19-data/master/us-counties.csv'
+covid_data = read_csv(url)
+```
+#question 2.2
+```{r}
+txt <- "2022-01-01"
+class(txt)
+
+my.date <- as.Date(txt)
+
+my.date <- as.Date("2022-02-01")
+my.state <- "Colorado"
+```
+# question 2.4 
+# cumulative cases
+```{r}
+"Colorado" <- covid_data |>
+  filter(state == my.state) |>
+  group_by(county) |>
+  mutate(new_cases = cases - lag(cases, default = first(cases)), 
+         new_deaths = deaths - lag(deaths, default = first(deaths))) |>
+  ungroup()
+```
+```{r}
+top_cumulative_cases <- filter(Colorado, date == my.date) %>% 
+  slice_max(cases, n = 5) %>% select(Date = date, County = county, Cases = cases) %>%
+  flextable() %>% 
+  set_caption("Top 5 Counties with Most Cumulative Cases")
+``` 
+
+#new cases
+```{r}
+top_new_cases <- filter(Colorado, date == my.date) %>% 
+  slice_max(new_cases, n = 5) %>% select(Date = date, County = county, "New Cases" = new_cases) %>%
+  flextable() %>% 
+  set_caption("Top 5 Counties with Most New Cases")
+```
+
+```{r}
+print(top_cumulative_cases)
+print(top_new_cases)
+```
+
+#Question 3
+```{r}
+pop_url <- 'https://www2.census.gov/programs-surveys/popest/datasets/2020-2023/counties/totals/co-est2023-alldata.csv'
+population_data = read_csv(pop_url)
+```
+#3.1
+```{r}
+population_data <- population_data |> mutate(
+STATE = sprintf("%02d", as.numeric(STATE)),
+COUNTY = sprintf("%03d", as.numeric(COUNTY)), 
+FIP = paste0(STATE, COUNTY)
+)
+head(population_data)
+```
+
+#3.2 There are many columns, but Covid_data and the new population_data share the FIP column, which I renamed in the covid_data to ensure that they are able to merge. The data obtained after modification has a lot of other data that we don't need like "internationalmig2021" which I'm assuming we won't need in the end. However, I think the bes thing is that we can merge the two data sets because they both have the column FIP. There are 17 columns and 3195 rows. 
+```{r}
+names(population_data)
+dim(population_data)
+nrow(population_data)
+```
+
+```{r}
+population_data <- population_data %>% select(matches("NAMES|2021"), FIP) %>% 
+  filter("COUNTY" != "000")
+head(population_data)
+```
+#renaming covid_data fips to FIP so that I can merge data sets later, assuming we need to do this
+```{r}
+Colorado <- Colorado %>% rename(FIP = fips)
+```
+#3.3, In Colorado counties, there is a range of populations from 741 to 581,1596. 
+```{r}
+Colorado_populations <- population_data %>% 
+  filter(substr(FIP, 1, 2) == "08")
+
+Colorado_range_population <- range(Colorado_populations$POPESTIMATE2021, na.rm = TRUE)
+print(Colorado_range_population)
+```
+#3.4
+```{r}
+merged_data <- left_join(Colorado, population_data, by = "FIP")
+head(merged_data)
+```
+```{r}
+merged_data_per_captia <- merged_data %>%
+  mutate(per_capita_cumulative_cases = cases / POPESTIMATE2021,
+       per_capita_new_cases = new_cases / POPESTIMATE2021,
+         per_capita_new_deaths = new_deaths / POPESTIMATE2021)
+head(merged_data_per_captia)
+```
+#3.5
+```{r}
+data_2021_01_01 <- merged_data_per_captia %>%
+  filter(date == "2021-01-01")
+
+top_cumulative_cases <- data_2021_01_01 %>%
+  arrange(desc(per_capita_cumulative_cases)) %>%
+  select(county, per_capita_cumulative_cases) %>%
+  head(5)
+
+table1 <- flextable(top_cumulative_cases) %>%
+  set_caption("Top 5 Counties with Most Cumulative Cases Per Capita on 2021-01-01") %>%
+  colformat_num(j = "per_capita_cumulative_cases", digits = 6)
+
+top_new_cases <- data_2021_01_01 %>%
+  arrange(desc(per_capita_new_cases)) %>%
+  select(county, per_capita_new_cases) %>%
+  head(5)
+
+table2 <- flextable(top_new_cases) %>%
+  set_caption("Top 5 Counties with Most New Cases Per Captia on 2021-01-01") %>%
+  colformat_num(j = "per_capita_new_cases", digits = 6)
+
+print(table1)
+```
+```{r}
+print(table2)
+```
+
+
+#Question 4 There are 53 counties that meet the watch list condition: "more than 100 new cases per 100,000 residents over the past 14 days."
+```{r}
+lastest_date <- max(merged_data_per_captia$date, na.rm = TRUE)
+
+last_14_days_data <- merged_data_per_captia %>%
+  filter(date >= (lastest_date - 13))
+
+summary_table <- last_14_days_data %>%
+  group_by(county, POPESTIMATE2021) %>%
+  summarize(total_new_cases = sum(new_cases, na.rm = TRUE), .groups = "drop") %>%
+  mutate(new_cases_per_100k = (total_new_cases / POPESTIMATE2021) * 100000)
+
+top_5_counties <- summary_table %>%
+  arrange(desc(new_cases_per_100k)) %>%
+  select(county, new_cases_per_100k) %>%
+  head(5)
+
+table_top_5 <- flextable(top_5_counties) %>%
+  set_caption("Top 5 Counties with Most New Cases Per 100,000 People in the Last 14 Days") %>%
+  colformat_num(j = "new_cases_per_100k", digits = 2)
+
+watchlist_count <- summary_table %>%
+  filter(new_cases_per_100k > 100) %>%
+  nrow()
+
+table_top_5
+print(paste("Number of counties meeting the watch list condition (>100 new cases per 100,000 residents):", watchlist_count))
+```
+
+#Question 5
+```{r}
+covid_deaths_summary <- merged_data_per_captia %>%
+  group_by(county) %>%
+  summarize(total_covid_deaths = sum(new_deaths, na.rm = TRUE), .groups = "drop")
+
+death_ratio_data <- covid_deaths_summary %>%
+  left_join(merged_data_per_captia %>% select(county, DEATHS2021) %>% distinct (), by = c("county")) %>%
+  mutate(covid_death_ratio = (total_covid_deaths / DEATHS2021) * 100)
+
+high_ratio_counties <- death_ratio_data %>%
+  filter(covid_death_ratio >= 20)
+
+ggplot(high_ratio_counties, aes(x = reorder(county, covid_death_ratio), y = covid_death_ratio, fill = covid_death_ratio)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(title = "Counties Where Covid Deaths Account for 20% or More of Total Deaths (2021)",
+       x = "County",
+       y = "COVID Deaths as % of Total Deaths",
+       fill = "Percentage") +
+  theme_minimal() +
+  scale_fill_gradient(low = "yellow", high = "red")
+```
+
+
+#Question 6
+```{r}
+covid_data <- covid_data %>% rename(FIP = fips)
+```
+```{r}
+question6_merged_data <- left_join(covid_data, population_data, by = "FIP")
+head(question6_merged_data)
+```
+```{r}
+names(question6_merged_data)
+```
+
+#6.2
+```{r}
+state_level_data <- question6_merged_data %>%
+  group_by(state, date) %>%
+  summarize(daily_new_cases = sum(cases, na.rm = TRUE), .groups = "drop") %>%
+  filter(state %in% c("New York", "Colorado", "Alabama", "Ohio")) %>%
+  group_by(state) %>%
+  mutate(
+    new_cases_lagged = daily_new_cases - lag(daily_new_cases),
+    rolling_mean_7day = zoo::rollmean(new_cases_lagged, k = 7, fill = NA, align = "right"))
+
+ggplot(state_level_data, aes(x = date)) +
+  geom_col(aes(y = new_cases_lagged), fill = "purple", col = NA) +
+  geom_line(aes(y = rolling_mean_7day), color = "blue", col = NA, size = 0.5) +
+  facet_wrap(~state, nrow = 2, scales = "free_y") +
+  labs(title = "Daily New COVID-19 Cases with 7-Day Rolling Average",
+    subtitle = "Comparing New York, Colorado, Alabama, and Ohio",
+    x = "Date",
+    y = "New Cases")
+```
+
+#question 6.3
+```{r}
+state_level_data <- question6_merged_data %>%
+  group_by(state, date) %>%
+  summarize(daily_new_cases = sum(cases, na.rm = TRUE), .groups = "drop") %>%
+  filter(state %in% c("New York", "Colorado", "Alabama", "Ohio")) %>%
+  arrange(state, date) %>%
+  mutate(new_cases_lagged = daily_new_cases - lag(daily_new_cases, order_by = date))
+
+state_population <- question6_merged_data %>%
+  select(state, POPESTIMATE2021) %>%
+  distinct(state, .keep_all = TRUE)
+
+state_per_capita_data <- state_level_data %>% left_join(state_population, by = "state") %>% mutate(new_cases_per_capita = new_cases_lagged / POPESTIMATE2021, rolling_mean_per_capita = zoo::rollmean(new_cases_per_capita, k = 7, fill = NA, align = "right", na.rm = TRUE)) %>% ungroup()
+```
+
+
+```{r}
+ggplot(state_per_capita_data, aes(x = date)) +
+  geom_line(aes(y = rolling_mean_per_capita, color = state), 
+  size = 1) + theme_linedraw() +
+  labs(
+    title = "7-Day Rolling Average of COVID-19 Cases Per Capita",
+    subtitle = "Multi-State Comparison",
+    x = "Date",
+    y = "New Cases Per Capita",
+    color = "State")
+print(state_per_capita_data)
+```
+#Question 6.5 The importance of sclaing by population makes the data more accurate because if we are simply looking at cases without taking into account the amount of people within each county then we are going to get skewed data. When looking at scaling data by population, it  makes some states look worse because they have a lower population but the same amount of cases as another state that has a higher population and vice versa. Some states have a higher population but a lower amount of cases in comaprison to a state the same amount of cases but a lower amount of covid cases. 
+
+#Question 7 The movement of Covid-19 weighted mean thorught the USA seems to be slopping down Southeast. From January through Arpil it is in central USA, then over the summer and fall month it moves down south more. Some possible drivers of this could be more democrats in the South, people specifically in these areas were known to not wear masks as frequently, thus providing more opportunity for the virus to spread. 
+```{r}
+location_url <- 'https://raw.githubusercontent.com/mikejohnson51/csu-ess-330/refs/heads/main/resources/county-centroids.csv'
+location_data = read_csv(location_url)
+
+location_data <- location_data %>% rename(FIP = fips)
+question7_joined <- full_join(covid_data , location_data , by = "FIP")
+print(question7_joined)
+```
+```{r}
+wmc_data <- question7_joined %>%
+  group_by(date) %>%
+  summarise(wm_LON = sum(LON * cases, na.rm = TRUE) / sum(cases, na.rm = TRUE),
+            wm_LAT = sum(LAT * cases, na.rm = TRUE) / sum(cases, na.rm = TRUE),
+            total_cases = sum(cases, na.rm = TRUE),
+          month = format(date, "%m"),
+            .groups = "drop")
+```
+
+
+```{r}
+ggplot(wmc_data) +
+  borders("state", fill = "gray90", colour = "white") +
+  geom_point(aes(x = wm_LON, y = wm_LAT, size = total_cases), color = "purple", alpha = .25) + theme_linedraw() +
+  labs(title = "Weighted Mean Center of Covid-19 Cases Over Time",
+       x = "",
+       y = "",
+       color = "Time",
+       size = "Total Cases") + theme(legend.position = "none")
+```
+
+
